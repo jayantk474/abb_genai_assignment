@@ -62,8 +62,7 @@ INSTRUCTIONS:
 - Use only CONTEXT.
 - If future/out-of-scope -> respond exactly: "This question cannot be answered based on the provided documents."
 - If not specified -> respond exactly: "Not specified in the document."
-Return JSON with keys: answer, sources.
-sources must be a list of citations, each citation is: [document, section, page].
+Respond with only the final answer sentence.
 """
 def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperature: float):
     # Ensure pad token exists

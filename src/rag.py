@@ -23,9 +23,9 @@ class RagSystem:
 
     def retrieve(self, q: str) -> List[Dict[str, Any]]:
         qv = self.embed_query(q)
-        vec_hits = faiss_search(self.index, qv, self.cfg.fetch_k)
+        vec_hits = faiss_search(self.index, qv, self.cfg.top_k_retrieve)
         # Hybrid combine (vector + BM25) for robustness
-        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.25, top_k=self.cfg.fetch_k)
+        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.25, top_k=self.cfg.top_k_retrieve)
 
         # Prepare candidates
         candidates = [{

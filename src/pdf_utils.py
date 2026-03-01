@@ -45,23 +45,45 @@ def guess_section(text: str) -> str:
     return "Unknown section"
 
 def chunk_pages(pages: List[PageText], doc_name: str, chunk_chars: int, overlap_chars: int):
-    """
-    Page-level chunking.
-    Each page becomes its own chunk.
-    This avoids mixing tables with unrelated numeric paragraphs.
-    """
+    buffer = ""
+    start_page = pages[0].page if pages else 1
+    current_page = start_page
+
     for p in pages:
-        if not p.text.strip():
+        if not p.text:
             continue
 
-        section = guess_section(p.text)
+        if not buffer:
+            start_page = p.page
 
+        buffer += "\n\n" + p.text
+        current_page = p.page
+
+        while len(buffer) >= chunk_chars:
+            chunk_text = buffer[:chunk_chars]
+            section = guess_section(chunk_text)
+
+            yield {
+                "text": chunk_text.strip(),
+                "metadata": {
+                    "document": doc_name,
+                    "page_start": start_page,
+                    "page_end": current_page,
+                    "section": section,
+                },
+            }
+
+            buffer = buffer[chunk_chars - overlap_chars:]
+            start_page = current_page
+
+    if buffer.strip():
+        section = guess_section(buffer)
         yield {
-            "text": p.text.strip(),
+            "text": buffer.strip(),
             "metadata": {
                 "document": doc_name,
-                "page_start": p.page,
-                "page_end": p.page,
+                "page_start": start_page,
+                "page_end": current_page,
                 "section": section,
             },
         }
