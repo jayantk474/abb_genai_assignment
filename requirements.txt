@@ -1,0 +1,9 @@
+pypdf==4.2.0
+sentence-transformers==3.0.1
+faiss-cpu==1.8.0.post1
+transformers==4.44.2
+accelerate==0.33.0
+torch>=2.1.0
+numpy>=1.24.0
+tqdm>=4.66.0
+rank-bm25==0.2.2
