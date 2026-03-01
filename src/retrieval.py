@@ -32,7 +32,7 @@ def hybrid_rank(
     vec_hits: List[Tuple[int, float]],
     bm25: HybridRetriever,
     alpha: float = 0.65,
-    top_k: int = 20,
+    top_k: int = 5,
 ) -> List[Tuple[int, float]]:
     """Combine vector hit list with BM25 into a unified ranking.
     alpha controls weight on vector similarity.

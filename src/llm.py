@@ -57,46 +57,53 @@ sources must be a list of citations, each citation is: [document, section, page]
     # If chat template exists, we will apply later.
     return user
 
-def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperature: float) -> Dict[str, Any]:
-    # Use chat template if available
+def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperature: float):
+
     if hasattr(tokenizer, "apply_chat_template"):
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer.apply_chat_template(
+            messages,
+            return_tensors="pt",
+            add_generation_prompt=True
+        )
     else:
         text = SYSTEM_PROMPT + "\n\n" + prompt
+        inputs = tokenizer(text, return_tensors="pt")
 
-    inputs = tokenizer(text, return_tensors="pt")
     if torch.cuda.is_available():
-        inputs = {k:v.to(model.device) for k,v in inputs.items()}
+        inputs = inputs.to(model.device)
 
     with torch.no_grad():
-        out = model.generate(
+        output = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=temperature > 0,
-            temperature=temperature if temperature > 0 else None,
-            top_p=0.9 if temperature > 0 else None,
+            do_sample=False,
             eos_token_id=tokenizer.eos_token_id,
         )
 
-    decoded = tokenizer.decode(out[0], skip_special_tokens=True)
 
-    # Try to locate the last JSON object in the output
+    generated_tokens = output[0][inputs["input_ids"].shape[-1]:]
+    decoded = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+
+    # Extract JSON safely
     import re, json
-    m = re.findall(r"\{[\s\S]*\}", decoded)
-    if not m:
-        # fallback: return whole text
-        return {"answer": decoded.strip(), "sources": []}
-    candidate = m[-1]
-    try:
-        obj = json.loads(candidate)
-        if "answer" not in obj:
-            obj["answer"] = obj.get("response","")
-        if "sources" not in obj:
-            obj["sources"] = []
-        return obj
-    except Exception:
-        return {"answer": decoded.strip(), "sources": []}
+    match = re.search(r"\{[\s\S]*\}", decoded)
+
+    if match:
+        try:
+            obj = json.loads(match.group(0))
+            return {
+                "answer": obj.get("answer", "").strip(),
+                "sources": obj.get("sources", [])
+            }
+        except:
+            pass
+
+    # fallback
+    return {
+        "answer": decoded,
+        "sources": []
+    }

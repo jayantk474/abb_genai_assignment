@@ -15,6 +15,6 @@ class RagConfig:
     chunk_overlap_chars: int = 150
 
     # Retrieval
-    top_k_retrieve: int = 10
+    top_k_retrieve: int = 5
     top_k_rerank: int = 3
 
