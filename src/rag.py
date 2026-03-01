@@ -74,5 +74,5 @@ class RagSystem:
         obj["sources"] = sources
         print("Retrieved", len(contexts), "chunks")
         print(contexts[0]["metadata"])
-        print(contexts[0]["text"][:400]
+        print(contexts[0]["text"][:400])
         return obj
