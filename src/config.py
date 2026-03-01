@@ -9,11 +9,12 @@ class RagConfig:
     # LLM (open) – small enough for Colab CPU/GPU; works better on GPU.
     llm_model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     # Chunking
-    chunk_chars: int = 3500
-    chunk_overlap_chars: int = 400
+    chunk_chars: int = 1400
+    chunk_overlap_chars: int = 150
+
     # Retrieval
     top_k_retrieve: int = 20
-    top_k_rerank: int = 5
+    top_k_rerank: int = 3
     # Answer controls
     max_new_tokens: int = 450
     temperature: float = 0.2
