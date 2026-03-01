@@ -8,21 +8,20 @@ from src.vector_store import VectorIndex
 from src.rag import RagSystem
 
 QUESTIONS = [
-    (1, "What is the total net sales/revenue for Apple Inc. for FY2024?"),
-    (2, "How many shares of common stock of Apple Inc. were outstanding as of October 18, 2024?"),
-    (3, "What is the total term debt (current and non-current) for Apple Inc. as of September 28, 2024?"),
-    (4, "On what date did Apple file its 2024 10-K?"),
-    (5, "Does Apple have any unresolved staff comments from the SEC?"),
-    (6, "What is the total revenue for Tesla for FY2023?"),
-    (7, "What percentage of Tesla's total revenue in FY2023 came from automotive sales (excluding leasing)?"),
-    (8, "Why is Tesla dependent on Elon Musk?"),
-    (9, "Which vehicles does Tesla currently produce and deliver?"),
-    (10, "What is the purpose of Tesla's lease pass-through fund arrangements?"),
-    (11, "What is the forecasted stock price for Tesla in 2025?"),
-    (12, "Who is Apple's CFO as of 2025?"),
-    (13, "What color is Tesla's headquarters?"),
+    (1, "What was Apples total revenue for the fiscal year ended September 28, 2024?"),
+    (2, "How many shares of common stock were issued and outstanding as of October 18, 2024?"),
+    (3, "What is the total amount of term debt (current + non-current) reported by Apple as of September 28, 2024?"),
+    (4, "On what date was Apples 10-K report for 2024 signed and filed with the SEC?"),
+    (5, "Does Apple have any unresolved staff comments from the SEC as of this filing? How do you know?"),
+    (6, "What was Teslas total revenue for the year ended December 31, 2023?"),
+    (7, "What percentage of Teslas total revenue in 2023 came from Automotive Sales (excluding Leasing)?"),
+    (8, "What is the primary reason Tesla states for being highly dependent on Elon Musk?"),
+    (9, "What types of vehicles does Tesla currently produce and deliver?"),
+    (10, "What is the purpose of Teslas 'lease pass-through fund arrangements'?"),
+    (11, "What is Teslas stock price forecast for 2025?"),
+    (12, "Who is the CFO of Apple as of 2025?"),
+    (13, "What color is Teslas headquarters painted?")
 ]
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--index_dir", default="artifacts/index", help="Directory containing faiss.index and store.jsonl")
