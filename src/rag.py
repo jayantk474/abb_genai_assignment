@@ -23,9 +23,9 @@ class RagSystem:
 
     def retrieve(self, q: str) -> List[Dict[str, Any]]:
         qv = self.embed_query(q)
-        vec_hits = faiss_search(self.index, qv, self.cfg.top_k_retrieve)
+        vec_hits = faiss_search(self.index, qv, self.cfg.fetch_k)
         # Hybrid combine (vector + BM25) for robustness
-        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.45, top_k=self.cfg.top_k_retrieve)
+        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.45, top_k=self.cfg.fetch_k)
 
         # Prepare candidates
         candidates = [{
@@ -43,7 +43,7 @@ class RagSystem:
                 c["rerank_score"] = float(r)
             candidates.sort(key=lambda x: x.get("rerank_score", 0.0), reverse=True)
 
-        top = candidates[: self.cfg.top_k_rerank]
+        top = candidates[: self.cfg.top_k_retrieve]  # final top-5 after rerank
         return [{"text": c["text"], "metadata": c["metadata"]} for c in top]
 
     def answer_question(self, q: str) -> Dict[str, Any]:

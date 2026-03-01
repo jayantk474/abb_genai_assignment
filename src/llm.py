@@ -52,10 +52,9 @@ def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
         pstart = m.get("page_start","?")
         pend = m.get("page_end","?")
         header = f"[{i}] SOURCE: {doc} | {sec} | p. {pstart}" + (f"-{pend}" if pend != pstart else "")
-        ctx_blocks.append(header + "\n" + c["text"])
+        ctx_blocks.append(header + "\n" + c["text"][:2500])
     ctx_text = "\n\n".join(ctx_blocks)
-    MAX_CONTEXT_CHARS = 3500
-    ctx_text = ctx_text[:MAX_CONTEXT_CHARS]
+
 
     user = f"""QUESTION:
 {question}
