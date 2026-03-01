@@ -64,17 +64,23 @@ def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperatur
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        inputs = tokenizer.apply_chat_template(
+
+        # Get tokenized inputs properly
+        input_ids = tokenizer.apply_chat_template(
             messages,
             return_tensors="pt",
             add_generation_prompt=True
         )
+
+        inputs = {"input_ids": input_ids}
+
     else:
         text = SYSTEM_PROMPT + "\n\n" + prompt
         inputs = tokenizer(text, return_tensors="pt")
 
+    # Move to GPU if available
     if torch.cuda.is_available():
-        inputs = inputs.to(model.device)
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     with torch.no_grad():
         output = model.generate(
@@ -84,11 +90,12 @@ def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperatur
             eos_token_id=tokenizer.eos_token_id,
         )
 
-
-    generated_tokens = output[0][inputs["input_ids"].shape[-1]:]
+    #  decode ONLY new tokens
+    input_length = inputs["input_ids"].shape[-1]
+    generated_tokens = output[0][input_length:]
     decoded = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
-    # Extract JSON safely
+    # Extract JSON
     import re, json
     match = re.search(r"\{[\s\S]*\}", decoded)
 
@@ -102,7 +109,6 @@ def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperatur
         except:
             pass
 
-    # fallback
     return {
         "answer": decoded,
         "sources": []
