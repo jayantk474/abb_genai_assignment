@@ -28,13 +28,15 @@ Return ONLY valid JSON:
 """
 
 def load_llm(model_name: str):
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     # Many instruct models expect a chat template; Phi-3 supports chat template in tokenizer.
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if torch.cuda.is_available() else None,
+        device_map="cpu",
+        torch_dtype=torch.float16,  # ↓ cuts RAM vs float32
+        low_cpu_mem_usage=True
     )
+    model.eval()
     return tokenizer, model
 
 def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
