@@ -82,17 +82,32 @@ def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperatur
         ]
 
         # Get tokenized inputs properly
-        input_ids = tokenizer.apply_chat_template(
+        inputs = tokenizer.apply_chat_template(
             messages,
             return_tensors="pt",
             add_generation_prompt=True
         )
 
-        inputs = {"input_ids": input_ids}
+        # enforce max input length (Phi-3 = 4096 context)
+        max_input_tokens = 3500
+        if inputs.shape[1] > max_input_tokens:
+            inputs = inputs[:, -max_input_tokens:]
+
+        attention_mask = torch.ones_like(inputs)
+
+        inputs = {
+            "input_ids": inputs,
+            "attention_mask": attention_mask,
+        }
 
     else:
         text = SYSTEM_PROMPT + "\n\n" + prompt
         inputs = tokenizer(text, return_tensors="pt")
+
+        max_input_tokens = 3500
+        if inputs["input_ids"].shape[1] > max_input_tokens:
+            inputs["input_ids"] = inputs["input_ids"][:, -max_input_tokens:]
+            inputs["attention_mask"] = inputs["attention_mask"][:, -max_input_tokens:]
 
     # Move to GPU if available
     if torch.cuda.is_available():

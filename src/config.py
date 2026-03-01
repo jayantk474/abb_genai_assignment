@@ -8,7 +8,7 @@ class RagConfig:
     reranker_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     # LLM (open) – small enough for Colab CPU/GPU; works better on GPU.
     llm_model_name: str = "microsoft/Phi-3-mini-4k-instruct"
-    max_new_tokens: int = 120
+    max_new_tokens: int = 80
     temperature: float = 0.0
     # Chunking
     chunk_chars: int = 1200
