@@ -13,6 +13,8 @@ Always provide a short, direct answer.
 Also return supporting sources as a list of citations formatted like:
 ["Apple 10-K", "Item 8", "p. 282"]
 Only cite sources that appear in the provided context metadata.
+If multiple numeric values appear, select ONLY the value that directly answers the question.
+Do not include unrelated financial figures.
 """
 
 def load_llm(model_name: str):

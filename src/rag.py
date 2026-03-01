@@ -25,7 +25,7 @@ class RagSystem:
         qv = self.embed_query(q)
         vec_hits = faiss_search(self.index, qv, self.cfg.top_k_retrieve)
         # Hybrid combine (vector + BM25) for robustness
-        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.65, top_k=self.cfg.top_k_retrieve)
+        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.45, top_k=self.cfg.top_k_retrieve)
 
         # Prepare candidates
         candidates = [{
