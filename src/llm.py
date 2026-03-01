@@ -14,6 +14,8 @@ When multiple numeric values appear in the context:
 - Do NOT choose deferred revenue if the question asks for total revenue.
 - Do NOT choose repurchase counts if the question asks for shares outstanding.
 
+For numeric questions, copy the value from the line whose label matches the question (e.g., ‘Total net sales’, ‘Term debt’, ‘shares issued and outstanding’). Do not use other numbers.
+
 If the question is about the future or not in the filings, answer exactly:
 "This question cannot be answered based on the provided documents."
 
