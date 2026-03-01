@@ -42,21 +42,29 @@ def load_llm(model_name: str):
     print("Model device:", next(model.parameters()).device)
     return tokenizer, model
 
-def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
-    # contexts: list of {"text": ..., "metadata": {...}}
+def build_prompt(question: str, contexts: list[dict]) -> str:
+    # Keep only top-5 contexts (already reranked)
+    contexts = contexts[:5]
+
     ctx_blocks = []
-    for i, c in enumerate(contexts, start=1):
-        m = c["metadata"]
-        doc = m.get("document","")
-        sec = m.get("section","Unknown section")
-        pstart = m.get("page_start","?")
-        pend = m.get("page_end","?")
-        header = f"[{i}] SOURCE: {doc} | {sec} | p. {pstart}" + (f"-{pend}" if pend != pstart else "")
-        ctx_blocks.append(header + "\n" + c["text"][:2500])
+    total = 0
+    MAX_TOTAL_CTX_CHARS = 6500
+    MAX_CHUNK_CHARS = 1400
+
+    for i, c in enumerate(contexts, 1):
+        md = c["metadata"]
+        header = f'[{i}] SOURCE: {md["document"]} | {md["section"]} | p. {md["page_start"]}-{md["page_end"]}'
+        chunk = c["text"][:MAX_CHUNK_CHARS]
+
+        block = header + "\n" + chunk
+        if total + len(block) > MAX_TOTAL_CTX_CHARS:
+            break
+        ctx_blocks.append(block)
+        total += len(block)
+
     ctx_text = "\n\n".join(ctx_blocks)
 
-
-    user = f"""QUESTION:
+    return f"""QUESTION:
 {question}
 
 CONTEXT:
@@ -64,83 +72,45 @@ CONTEXT:
 
 INSTRUCTIONS:
 - Use only CONTEXT.
-- If future/out-of-scope -> respond with the exact out-of-scope sentence.
-- If not specified -> respond with the exact not-specified sentence.
-- Otherwise answer concisely.
+- If future/out-of-scope -> respond exactly: "This question cannot be answered based on the provided documents."
+- If not specified -> respond exactly: "Not specified in the document."
 Return JSON with keys: answer, sources.
 sources must be a list of citations, each citation is: [document, section, page].
 """
-    # If chat template exists, we will apply later.
-    return user
-
 def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperature: float):
+    # Ensure pad token exists
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-    if hasattr(tokenizer, "apply_chat_template"):
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ]
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=3500,      # safe under 4k context
+    ).to(model.device)
 
-        # Get tokenized inputs properly
-        inputs = tokenizer.apply_chat_template(
-            messages,
-            return_tensors="pt",
-            add_generation_prompt=True
-        )
+    output = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        temperature=0.0,
+        pad_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
 
-        # enforce max input length (Phi-3 = 4096 context)
-        max_input_tokens = 3500
-        if inputs.shape[1] > max_input_tokens:
-            inputs = inputs[:, -max_input_tokens:]
+    gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
+    decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
-        attention_mask = torch.ones_like(inputs)
-
-        inputs = {
-            "input_ids": inputs,
-            "attention_mask": attention_mask,
-        }
-
-    else:
-        text = SYSTEM_PROMPT + "\n\n" + prompt
-        inputs = tokenizer(text, return_tensors="pt")
-
-        max_input_tokens = 3500
-        if inputs["input_ids"].shape[1] > max_input_tokens:
-            inputs["input_ids"] = inputs["input_ids"][:, -max_input_tokens:]
-            inputs["attention_mask"] = inputs["attention_mask"][:, -max_input_tokens:]
-
-    # Move to GPU if available
-    if torch.cuda.is_available():
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        output = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-
-    #  decode ONLY new tokens
-    input_length = inputs["input_ids"].shape[-1]
-    generated_tokens = output[0][input_length:]
-    decoded = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-
-    # Extract JSON
+    # strip fences + parse first JSON object
     import re, json
-    match = re.search(r"\{[\s\S]*\}", decoded)
-
-    if match:
+    decoded = re.sub(r"```(?:json)?", "", decoded, flags=re.IGNORECASE).replace("```", "").strip()
+    m = re.search(r"\{[\s\S]*\}", decoded)
+    if m:
         try:
-            obj = json.loads(match.group(0))
-            return {
-                "answer": obj.get("answer", "").strip(),
-                "sources": obj.get("sources", [])
-            }
-        except:
+            obj = json.loads(m.group(0))
+            return {"answer": obj.get("answer", ""), "sources": obj.get("sources", [])}
+        except Exception:
             pass
 
-    return {
-        "answer": decoded,
-        "sources": []
-    }
+    # safe fallback
+    return {"answer": "Not specified in the document.", "sources": []}
