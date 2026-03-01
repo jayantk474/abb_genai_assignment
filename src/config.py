@@ -7,7 +7,7 @@ class RagConfig:
     # Reranker (CrossEncoder). Set to "" to disable.
     reranker_model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     # LLM (open) – small enough for Colab CPU/GPU; works better on GPU.
-    llm_model_name: str = "microsoft/Phi-3-mini-4k-instruct"
+    llm_model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     # Chunking
     chunk_chars: int = 3500
     chunk_overlap_chars: int = 400
