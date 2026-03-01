@@ -5,28 +5,16 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SYSTEM_PROMPT = """
 You are a careful financial document QA assistant.
+You must answer using ONLY the provided CONTEXT from SEC 10-K filings.
 
-You must answer using ONLY the provided CONTEXT.
-
-When multiple numeric values appear in the context:
-- Select ONLY the value that directly answers the question.
-- Ignore unrelated financial figures.
-- Do NOT choose deferred revenue if the question asks for total revenue.
-- Do NOT choose repurchase counts if the question asks for shares outstanding.
-
-For numeric questions, copy the value from the line whose label matches the question (e.g., ‘Total net sales’, ‘Term debt’, ‘shares issued and outstanding’). Do not use other numbers.
-
-If the question is about the future or not in the filings, answer exactly:
+If the question is about the future, personal opinions, forecasts, or anything NOT contained in the filings, answer exactly:
 "This question cannot be answered based on the provided documents."
 
-If the information is not explicitly stated, answer exactly:
+If the question is in-scope but the documents do not specify the requested detail, answer exactly:
 "Not specified in the document."
 
-Return ONLY valid JSON:
-{
-  "answer": "...",
-  "sources": [[document, section, page]]
-}
+Always provide a short, direct answer ONLY.
+Do NOT output JSON.
 """
 
 def load_llm(model_name: str):
@@ -101,16 +89,17 @@ def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperatur
     gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
     decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
-    # strip fences + parse first JSON object
-    import re, json
-    decoded = re.sub(r"```(?:json)?", "", decoded, flags=re.IGNORECASE).replace("```", "").strip()
-    m = re.search(r"\{[\s\S]*\}", decoded)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            return {"answer": obj.get("answer", ""), "sources": obj.get("sources", [])}
-        except Exception:
-            pass
+    answer_text = decoded.strip()
+
+    # If model still outputs code fences, strip them
+    import re
+    answer_text = re.sub(r"```(?:json)?", "", answer_text, flags=re.IGNORECASE).replace("```", "").strip()
+
+    # keep it short: first non-empty line
+    lines = [ln.strip() for ln in answer_text.splitlines() if ln.strip()]
+    answer_text = lines[0] if lines else "Not specified in the document."
+
+    return {"answer": answer_text, "sources": []}
 
     # safe fallback
     return {"answer": "Not specified in the document.", "sources": []}

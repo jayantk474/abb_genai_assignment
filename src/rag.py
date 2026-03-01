@@ -59,25 +59,20 @@ class RagSystem:
 
         # Ensure sources are well-formed and come from retrieved metadata.
         # We'll map to citations based on chosen chunks (avoid hallucinated citations).
-        citations = []
-        for c in contexts:
-            m = c["metadata"]
-            citations.append([m.get("document",""), m.get("section","Unknown section"), f"p. {m.get('page_start','?')}"])
-        # If model returned explicit sources, keep only those that match our allowed set (string compare)
-        allowed = {tuple(x) for x in citations}
-        cleaned = []
-        for s in obj.get("sources", []) or []:
-            try:
-                t = tuple(s)
-                if t in allowed:
-                    cleaned.append(list(t))
-            except Exception:
-                pass
+        if obj["answer"] in [
+            "This question cannot be answered based on the provided documents.",
+            "Not specified in the document."
+        ]:
+            obj["sources"] = []
+            return obj
 
-        # If model didn't produce valid sources, fall back to our citations unless answer is a refusal.
-        answer = (obj.get("answer") or "").strip()
-        refusal_1 = "This question cannot be answered based on the provided documents."
-        refusal_2 = "Not specified in the document."
-        if answer in (refusal_1, refusal_2):
-            return {"answer": answer, "sources": []}
-        return {"answer": answer, "sources": cleaned if cleaned else citations}
+        # Otherwise, attach citations from the retrieved chunks (top-5)
+        sources = []
+        for c in contexts[:5]:
+            md = c["metadata"]
+            sources.append([md["document"], md["section"], f"p. {md['page_start']}"])
+        obj["sources"] = sources
+        print("Retrieved", len(contexts), "chunks")
+        print(contexts[0]["metadata"])
+        print(contexts[0]["text"][:400]
+        return obj
