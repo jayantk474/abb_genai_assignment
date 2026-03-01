@@ -32,11 +32,12 @@ def load_llm(model_name: str):
     # Many instruct models expect a chat template; Phi-3 supports chat template in tokenizer.
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="cpu",
+        device_map="auto",
         torch_dtype=torch.float16,  # ↓ cuts RAM vs float32
-        low_cpu_mem_usage=True
+        #low_cpu_mem_usage=True
     )
     model.eval()
+    print("Model device:", next(model.parameters()).device)
     return tokenizer, model
 
 def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
