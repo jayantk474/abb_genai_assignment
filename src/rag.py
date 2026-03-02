@@ -23,11 +23,14 @@ class RagSystem:
 
     def retrieve(self, q: str):
         """
-        Simple pipeline:
-        1) FAISS similarity search -> top_k_retrieve (5)
-        2) Rerank those 5 (if reranker enabled)
-        Returns list of {"text":..., "metadata":...}
+        Compliant pipeline:
+        - Vector similarity search: fetch a larger candidate set
+        - Re-rank candidates
+        - Return FINAL top-5 chunks (as required)
         """
+        FINAL_K = self.cfg.top_k_retrieve  # required = 5
+        CANDIDATE_K = 30  # internal only (can be 20-50)
+
         # Get embedder attribute safely (matches your repo)
         embedder = (
                 getattr(self, "embed_model", None)
@@ -39,53 +42,41 @@ class RagSystem:
 
         qv = embedder.encode([q], normalize_embeddings=True)[0]
 
-        # FAISS top-5
-        raw_hits = faiss_search(self.index, qv, top_k=self.cfg.top_k_retrieve)
+        # FAISS similarity -> candidate pool
+        raw_hits = faiss_search(self.index, qv, top_k=CANDIDATE_K)
 
-        # ---- Normalize hits to dicts: {"text":..., "metadata":..., "score":...} ----
+        # Normalize hits to dicts: {"text":..., "metadata":..., "score":...}
         candidates = []
         for h in raw_hits:
             if isinstance(h, dict):
-                # already normalized
                 candidates.append(h)
                 continue
 
-            # tuple/list formats:
             if isinstance(h, (tuple, list)):
-                # Common cases:
-                # (score, doc)  where doc is dict-like
                 if len(h) == 2 and isinstance(h[1], dict):
                     score, doc = h
                     candidates.append(
-                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)}
-                    )
+                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)})
                     continue
 
-                # (doc, score)
                 if len(h) == 2 and isinstance(h[0], dict):
                     doc, score = h
                     candidates.append(
-                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)}
-                    )
+                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)})
                     continue
 
-                # (idx, score) or (score, idx) -> use idx to fetch stored chunk
                 if len(h) == 2 and all(isinstance(x, (int, float)) for x in h):
                     a, b = h
-                    # try interpret first as idx
                     idx = int(a)
                     score = float(b)
                     if hasattr(self, "store") and hasattr(self.store, "get"):
                         doc = self.store.get(idx)
                         candidates.append({"text": doc["text"], "metadata": doc["metadata"], "score": score})
-                        continue
-                    # otherwise can't resolve -> skip
                     continue
 
-            # unknown format -> skip
             continue
 
-        # If reranker enabled, rerank these 5
+        # If reranker enabled, rerank candidate pool
         if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
             scores = self.reranker.predict(pairs)
@@ -93,8 +84,8 @@ class RagSystem:
                 c["_rerank_score"] = float(s)
             candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
 
-        # final top-5
-        top = candidates[: self.cfg.top_k_retrieve]
+        # Final top-5 (rubric)
+        top = candidates[:FINAL_K]
         return [{"text": c["text"], "metadata": c["metadata"]} for c in top]
 
     def answer_question(self, q: str):
