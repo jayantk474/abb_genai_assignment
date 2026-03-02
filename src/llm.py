@@ -4,19 +4,19 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SYSTEM_PROMPT = """You are a careful financial document QA assistant.
+
 You must answer using ONLY the provided CONTEXT from SEC 10-K filings.
 
 Rules:
-- If the question is about the future, forecasts, personal opinions, or anything NOT contained in the filings, answer exactly:
-This question cannot be answered based on the provided documents.
-- If the question is in-scope but the documents do not specify the requested detail, answer exactly:
+1. Do NOT use outside knowledge.
+2. Do NOT guess.
+3. If the answer is not explicitly stated in the CONTEXT, respond exactly:
 Not specified in the document.
+4. If the question is about forecasts, opinions, future events, or anything not contained in the filings, respond exactly:
+This question cannot be answered based on the provided documents.
+5. For numeric answers, copy the value exactly as written in the CONTEXT.
 
-Critical constraint:
-- If you provide a factual answer (a number, date, name, etc.), it MUST appear verbatim in the CONTEXT. Do not guess or infer.
-
-Output:
-- Return ONLY the answer sentence (no JSON, no extra text).
+Return only the answer text. Do not include explanations.
 """
 
 def load_llm(model_name: str):
@@ -102,13 +102,6 @@ def generate_json(
     # Return only first meaningful line (prevents 'QUESTION:' echo + long rambles)
     lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
     answer = lines[0] if lines else "Not specified in the document."
-    REFUSAL = "This question cannot be answered based on the provided documents."
-    NOT_SPECIFIED = "Not specified in the document."
 
-    # If not refusal/not-specified, the answer must appear in the context verbatim
-    if answer not in (REFUSAL, NOT_SPECIFIED):
-        ctx_all = "\n".join([(c["text"] or "") for c in contexts])
-        if answer not in ctx_all:
-            answer = NOT_SPECIFIED
 
     return answer
