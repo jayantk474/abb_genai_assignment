@@ -18,13 +18,12 @@ def _clean(text: str) -> str:
     return text.strip()
 
 def extract_pdf_pages(pdf_path: str) -> List[PageText]:
-    texts = []
+    pages = []
     with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages):
-            text = page.extract_text(x_tolerance=1, y_tolerance=1)
-            if text:
-                texts.append((i + 1, text))
-    return texts
+        for i, p in enumerate(pdf.pages, start=1):
+            txt = p.extract_text(x_tolerance=1, y_tolerance=1) or ""
+            pages.append(Page(page=i, text=txt))
+    return pages
 
 SECTION_RE = re.compile(
     r"\b(Item\s+\d+[A-Z]?)\b|\b(Signatures?)\b|\b(Notes?\s+to\s+Consolidated\s+Financial\s+Statements)\b",
