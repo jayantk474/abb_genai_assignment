@@ -34,20 +34,10 @@ class RagSystem:
         FINAL_K = self.cfg.top_k_retrieve  # must be 5 (assignment)
         CANDIDATE_K = 30  # internal candidate pool
 
-        # ---- Get embedder safely ----
-        embedder = (
-                getattr(self, "embed_model", None)
-                or getattr(self, "embedder", None)
-                or getattr(self, "embedding_model", None)
-        )
-        if embedder is None:
-            raise AttributeError("No embedding model found on RagSystem")
-
-        # ---- Encode query ----
-        qv = embedder.encode([q], normalize_embeddings=True)
+        qv = self.embedder.encode([q], normalize_embeddings=True)
         qv = np.array(qv).astype("float32")
 
-        # ---- FAISS search (use real index inside wrapper) ----
+        # ---- FAISS search (correct wrapper access) ----
         D, I = self.index.index.search(qv, CANDIDATE_K)
 
         candidates = []
@@ -62,7 +52,12 @@ class RagSystem:
                 "score": float(score)
             })
 
-        # ---- Optional reranking ----
+        # ---- IMPORTANT: Correct sorting ----
+        # If index built with cosine/IP → higher is better
+        # Most MiniLM FAISS builds use IndexFlatIP
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+
+        # ---- Optional reranker ----
         if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
             rerank_scores = self.reranker.predict(pairs)
@@ -71,45 +66,50 @@ class RagSystem:
                 c["_rerank_score"] = float(rs)
 
             candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
-        else:
-            # If no reranker, sort by similarity score
-            candidates.sort(key=lambda x: x["score"], reverse=True)
 
-        # ---- Final top-5 ----
         top = candidates[:FINAL_K]
-
-        print("Retrieved:", len(top))
 
         return [
             {"text": c["text"], "metadata": c["metadata"]}
             for c in top
         ]
 
-    def answer_question(self, q: str):
-        contexts = self.retrieve(q)
+    def answer_question(self, question_obj):
 
-        # Build sources from retrieved chunks (always from top-5)
+        qid = question_obj["question_id"]
+        question = question_obj["question"]
+
+        contexts = self.retrieve(question)
+
+        prompt = build_prompt(question, contexts)
+
+        answer = generate_json(
+            self.model,
+            self.tokenizer,
+            prompt,
+            self.cfg.max_new_tokens,
+            self.device,
+        )
+
+        # ---- Enforce rubric strings exactly ----
+        if "cannot be answered" in answer.lower():
+            answer = "This question cannot be answered based on the provided documents."
+
+        if "not specified" in answer.lower():
+            answer = "Not specified in the document."
+
+        # ---- Build source list ----
         sources = []
         for c in contexts:
             md = c["metadata"]
-            # exact requested format: ["Apple 10-K", "Item 8", "p. 28"]
-            sources.append([md["document"], md["section"], f"p. {md['page_start']}"])
+            sources.append([
+                md.get("document", ""),
+                md.get("section", ""),
+                f"p. {md.get('page_start')}-{md.get('page_end')}"
+            ])
 
-        # LLM answers only (no JSON from model)
-        answer_text = generate_json(
-            tokenizer=self.tokenizer,
-            model=self.model,
-            question=q,
-            contexts=contexts,
-            max_new_tokens=self.cfg.max_new_tokens,
-            temperature=self.cfg.temperature,
-        )
-
-        # Enforce rubric rules on sources
-        if answer_text in [
-            "This question cannot be answered based on the provided documents.",
-            "Not specified in the document.",
-        ]:
-            sources = []
-
-        return {"answer": answer_text, "sources": sources}
+        return {
+            "question_id": qid,
+            "answer": answer,
+            "sources": sources
+        }

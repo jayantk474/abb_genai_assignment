@@ -72,32 +72,27 @@ import torch
 import re
 
 @torch.inference_mode()
-def generate_json(
-    tokenizer,
-    model,
-    question: str,
-    contexts: list[dict],
-    max_new_tokens: int = 80,
-    temperature: float = 0.0,
-) -> str:
-    print("Retrieved:", len(contexts))
-    prompt = build_prompt(question, contexts)
+def generate_json(model, tokenizer, prompt: str, max_new_tokens: int, device: str):
 
-    # Ensure pad token exists (Phi-3 often uses eos as pad)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-    # print("PROMPT PREVIEW:")
-    # print(prompt[:1000])
-    # print("----- END PROMPT -----")
-    # Deterministic generation
     output = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
         do_sample=False,
+        temperature=0.0,
+        pad_token_id=tokenizer.eos_token_id,
     )
 
-    # Decode only generated tokens (prevents prompt echo)
+    # Decode ONLY newly generated tokens
     gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
-    answer = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
-    return answer
+    decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
+
+    # Remove accidental "Answer:" prefix
+    decoded = re.sub(r"^Answer\s*:\s*", "", decoded, flags=re.IGNORECASE).strip()
+
+    if not decoded:
+        return "Not specified in the document."
+
+    return decoded
