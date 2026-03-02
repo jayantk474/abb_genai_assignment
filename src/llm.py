@@ -82,31 +82,36 @@ def generate_json(
     prompt = build_prompt(question, contexts)
 
     # Ensure pad token exists (Phi-3 often uses eos as pad)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=3500
+    ).to(model.device)
 
-    inputs = tokenizer(prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
+    print("PROMPT PREVIEW:")
+    print(prompt[:1000])
+    print("----- END PROMPT -----")
     # Deterministic generation
     output = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
         do_sample=False,
+        temperature=0.0,
         pad_token_id=tokenizer.eos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
     )
 
     # Decode only generated tokens (prevents prompt echo)
-    gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
-    decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
+    #gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
+    decoded = tokenizer.decode(output[0], skip_special_tokens=True)
 
-    # Clean common artifacts
-    decoded = re.sub(r"```(?:json)?", "", decoded, flags=re.IGNORECASE).replace("```", "").strip()
+    # Extract only the answer after "Extracted Answer:"
+    if "Extracted Answer:" in decoded:
+        decoded = decoded.split("Extracted Answer:")[-1].strip()
 
-    # Return only first meaningful line (prevents 'QUESTION:' echo + long rambles)
-    lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
-    answer = lines[0] if lines else "Not specified in the document."
+    # Return first non-empty line
+    for line in decoded.splitlines():
+        if line.strip():
+            return line.strip()
 
-
-    return answer
+    return "Not specified in the document."
