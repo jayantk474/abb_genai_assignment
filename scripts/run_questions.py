@@ -30,8 +30,16 @@ def main():
     args = ap.parse_args()
 
     cfg = RagConfig()
-    index = VectorIndex.load(args.index_dir)
-    rag = RagSystem(cfg, index)
+    # Multi-index mode (recommended): artifacts/index/apple and artifacts/index/tesla
+    # Backwards-compatible: if no manifest exists, fall back to single index.
+    manifest_path = os.path.join(args.index_dir, "manifest.json")
+    if os.path.exists(manifest_path):
+        apple_index = VectorIndex.load(os.path.join(args.index_dir, "apple"))
+        tesla_index = VectorIndex.load(os.path.join(args.index_dir, "tesla"))
+        rag = RagSystem(cfg, {"apple": apple_index, "tesla": tesla_index})
+    else:
+        index = VectorIndex.load(args.index_dir)
+        rag = RagSystem(cfg, index)
 
     os.makedirs(os.path.dirname(args.out_json), exist_ok=True)
 
