@@ -7,6 +7,7 @@ from .config import RagConfig
 from .vector_store import VectorIndex, search as faiss_search
 from .retrieval import HybridRetriever, hybrid_rank
 from .llm import load_llm, build_prompt, generate_json
+import json
 
 class RagSystem:
     def __init__(self, cfg: RagConfig, index: VectorIndex):
@@ -74,13 +75,59 @@ class RagSystem:
             for c in top
         ]
 
-    def answer_question(self, question_obj):
 
-        qid = question_obj["question_id"]
-        question = question_obj["question"]
 
+    def answer_question(self, question_obj, fallback_qid=None):
+        """
+        Robust handler:
+        - question_obj can be:
+            1) dict: {"question_id": ..., "question": ...}
+            2) str containing JSON of that dict
+            3) plain str question text
+        """
+
+        # --- Normalize question_obj into (qid, question) ---
+        if isinstance(question_obj, dict):
+            qid = question_obj.get("question_id", fallback_qid)
+            question = question_obj.get("question") or question_obj.get("query") or question_obj.get("q")
+
+        elif isinstance(question_obj, str):
+            s = question_obj.strip()
+
+            # Case: JSON string line
+            if (s.startswith("{") and s.endswith("}")) or (s.startswith('"') and s.endswith('"')):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, dict):
+                        qid = parsed.get("question_id", fallback_qid)
+                        question = parsed.get("question") or parsed.get("query") or parsed.get("q")
+                    else:
+                        # JSON loads to a plain string
+                        qid = fallback_qid
+                        question = str(parsed)
+                except Exception:
+                    # Not valid JSON, treat as plain question
+                    qid = fallback_qid
+                    question = question_obj
+            else:
+                # Plain question text
+                qid = fallback_qid
+                question = question_obj
+
+        else:
+            raise TypeError(f"Unsupported question_obj type: {type(question_obj)}")
+
+        if question is None:
+            raise ValueError(f"Could not extract question text from: {question_obj}")
+
+        if qid is None:
+            # last resort: allow running without id, but keep deterministic
+            qid = fallback_qid if fallback_qid is not None else -1
+
+        # --- Retrieve contexts ---
         contexts = self.retrieve(question)
 
+        # --- Build prompt & generate answer ---
         prompt = build_prompt(question, contexts)
 
         answer = generate_json(
@@ -91,17 +138,17 @@ class RagSystem:
             self.device,
         )
 
-        # ---- Enforce rubric strings exactly ----
-        if "cannot be answered" in answer.lower():
+        # --- Enforce rubric strings exactly ---
+        a_low = answer.lower()
+        if "cannot be answered" in a_low:
             answer = "This question cannot be answered based on the provided documents."
-
-        if "not specified" in answer.lower():
+        elif "not specified" in a_low:
             answer = "Not specified in the document."
 
-        # ---- Build source list ----
+        # --- Sources ---
         sources = []
         for c in contexts:
-            md = c["metadata"]
+            md = c.get("metadata", {}) or {}
             sources.append([
                 md.get("document", ""),
                 md.get("section", ""),
@@ -109,7 +156,7 @@ class RagSystem:
             ])
 
         return {
-            "question_id": qid,
+            "question_id": int(qid) if str(qid).isdigit() else qid,
             "answer": answer,
             "sources": sources
         }
