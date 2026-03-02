@@ -40,8 +40,8 @@ def load_llm(model_name: str):
 def build_prompt(question: str, contexts: list[dict]) -> str:
     contexts = contexts[:5]
 
-    MAX_CHUNK_CHARS = 1600
-    MAX_TOTAL_CTX_CHARS = 7000
+    MAX_CHUNK_CHARS = 800
+    MAX_TOTAL_CTX_CHARS = 3500
 
     blocks = []
     total = 0
