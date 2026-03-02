@@ -21,7 +21,7 @@ class RagSystem:
         self.bm25: dict[str, HybridRetriever] = {
             k: HybridRetriever(v.texts) for k, v in self.indices.items()
         }
-        self.reranker = CrossEncoder(cfg.reranker_model_name,device="cpu") if cfg.reranker_model_name else None
+        self.reranker = CrossEncoder(cfg.reranker_model_name,device="cpu", max_length=256) if cfg.reranker_model_name else None
         self.tokenizer, self.model = load_llm(cfg.llm_model_name)
         # Convenience attribute used by some scripts/notebooks
         self.device = getattr(self.model, "device", None)
