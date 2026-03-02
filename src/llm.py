@@ -1,51 +1,51 @@
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
+
+from typing import Optional
+import re
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-SYSTEM_PROMPT = """You are a financial document extraction assistant.
+SYSTEM_PROMPT = """You are a strict financial document QA system.
 
 Use ONLY the information in the provided CONTEXT.
 
-Rules:
-- Use only the CONTEXT.
-- Do NOT use prior knowledge.
-- If the question requires a percentage or ratio, you may compute it ONLY using numbers explicitly present in the CONTEXT.
-- If the answer does not appear or cannot be derived directly from the CONTEXT, respond exactly:
+Rules (must follow exactly):
+- Use only the CONTEXT. Do not use prior knowledge.
+- Do NOT output citations or headers like "SOURCE:" or "Document:".
+- Output must be ONLY the answer text, on ONE line.
+- If the answer does not appear or cannot be derived directly from the CONTEXT, respond EXACTLY:
 Not specified in the document.
-- If the question is about future forecasts, opinions, or anything not present in the CONTEXT, respond exactly:
+- If the question is out-of-scope for the provided documents (e.g., stock price forecasts, 2025 Apple CFO, Tesla HQ color), respond EXACTLY:
 This question cannot be answered based on the provided documents.
+- If a percentage/ratio is requested, compute it ONLY using numbers explicitly present in the CONTEXT.
 
-Return only the final answer.
-Do not explain.
-"""
+Return only the final answer (one line)."""
+
 
 def load_llm(model_name: str):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    # Many instruct models expect a chat template; Phi-3 supports chat template in tokenizer.
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         device_map="auto",
-        torch_dtype=torch.float16,  # ↓ cuts RAM vs float32
-        #low_cpu_mem_usage=True
+        torch_dtype=torch.float16,
     )
     model.eval()
-    print("Model device:", next(model.parameters()).device)
     return tokenizer, model
 
-def build_prompt(question: str, contexts: list[dict]) -> str:
-    print("Retrieved:", len(contexts))
-    contexts = contexts[:5]
 
-    MAX_CHUNK_CHARS = 800
-    MAX_TOTAL_CTX_CHARS = 3500
+def build_prompt(question: str, contexts: list[dict]) -> str:
+    # Keep more context: table rows often need more than 800 chars.
+    contexts = contexts[:8]
+
+    MAX_CHUNK_CHARS = 2200
+    MAX_TOTAL_CTX_CHARS = 14000
 
     blocks = []
     total = 0
     for i, c in enumerate(contexts, 1):
-        md = c["metadata"]
-        header = f'[{i}] SOURCE: {md["document"]} | {md["section"]} | p. {md["page_start"]}-{md["page_end"]}'
-        chunk = (c["text"] or "").strip()[:MAX_CHUNK_CHARS]
+        md = c.get("metadata", {})
+        header = f'[{i}] SOURCE: {md.get("document","?")} | {md.get("section","?")} | p. {md.get("page_start","?")}-{md.get("page_end","?")}'
+        chunk = (c.get("text") or "").strip()[:MAX_CHUNK_CHARS]
         block = header + "\n" + chunk
         if total + len(block) > MAX_TOTAL_CTX_CHARS:
             break
@@ -64,34 +64,20 @@ QUESTION: {question}
 Answer:"""
 
 
-import torch
-import re
-
 @torch.inference_mode()
 def generate_json(tokenizer, model, *args, **kwargs) -> str:
     """Generate the completion for our RAG prompt.
 
-    This function is intentionally tolerant to minor signature mismatches
-    to prevent integration breakages across notebooks/scripts.
-
-    Supported call patterns:
-    - generate_json(tokenizer, model, question, contexts, max_new_tokens=..., temperature=...)
-    - generate_json(tokenizer, model, prompt, max_new_tokens=..., temperature=...)
-    - generate_json(..., question=..., contexts=...)
-    - generate_json(..., prompt=...)
-
-    Always returns ONLY the generated answer text (no prompt echo).
+    Returns ONLY the generated answer text (one line).
     """
 
     question: Optional[str] = kwargs.pop("question", None)
     contexts = kwargs.pop("contexts", None)
     prompt: Optional[str] = kwargs.pop("prompt", None)
-    max_new_tokens: int = int(kwargs.pop("max_new_tokens", 80))
+    max_new_tokens: int = int(kwargs.pop("max_new_tokens", 60))
     temperature: float = float(kwargs.pop("temperature", 0.0))
 
     # Positional parsing
-    # (question, contexts, [max_new_tokens], [temperature])
-    # or (prompt, [max_new_tokens], [temperature])
     if prompt is None and question is None and contexts is None:
         if len(args) >= 2:
             question = args[0]
@@ -109,17 +95,10 @@ def generate_json(tokenizer, model, *args, **kwargs) -> str:
 
     if prompt is None:
         if question is None or contexts is None:
-            raise TypeError(
-                "generate_json expected either (question, contexts) or (prompt). "
-                f"Got args={len(args)} and missing question/contexts/prompt."
-            )
+            raise TypeError("generate_json expected either (question, contexts) or (prompt).")
         prompt = build_prompt(str(question), contexts)
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    input_len = inputs["input_ids"].shape[-1]
-
-    # NOTE: we intentionally keep decoding strict and short to avoid
-    # the model inventing extra "QUESTION:" blocks.
     do_sample = temperature > 1e-6
 
     outputs = model.generate(
@@ -131,13 +110,24 @@ def generate_json(tokenizer, model, *args, **kwargs) -> str:
         eos_token_id=tokenizer.eos_token_id,
     )
 
-    # Only take newly generated tokens
-    generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+    generated_tokens = outputs[0][inputs["input_ids"].shape[1] :]
+    text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
-    text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+    # Hard stop: one line only
+    text = text.split("\n")[0].strip()
 
-    # HARD STOP — first line only (assignment expects a single answer string)
-    text = text.strip().split("\n")[0].strip()
+    # If the model starts inventing a new "QUESTION:", treat it as failure -> not specified.
+    if re.match(r"^QUESTION\s*:\s*", text, re.IGNORECASE):
+        return "Not specified in the document."
 
+    # Normalize exact required strings
+    if text.lower().startswith("not specified"):
+        return "Not specified in the document."
+    if text.lower().startswith("this question cannot be answered"):
+        return "This question cannot be answered based on the provided documents."
+
+    # Avoid returning headers
+    if text.lower().startswith("document:") or text.lower().startswith("source:"):
+        return "Not specified in the document."
 
     return text

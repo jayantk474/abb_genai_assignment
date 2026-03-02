@@ -19,4 +19,4 @@ class RagConfig:
     # Retrieval
     top_k_retrieve = 5
     # Candidates kept after hybrid scoring before cross-encoder rerank
-    top_k_rerank = 5
+    top_k_rerank = 30
