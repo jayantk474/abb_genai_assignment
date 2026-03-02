@@ -24,14 +24,17 @@ class RagSystem:
     def retrieve(self, q: str):
         """
         Compliant pipeline:
-        - Vector similarity search: fetch a larger candidate set
-        - Re-rank candidates
-        - Return FINAL top-5 chunks (as required)
+        - Vector similarity search (FAISS) → candidate pool
+        - Optional rerank
+        - Return FINAL top-5 chunks
         """
-        FINAL_K = self.cfg.top_k_retrieve  # required = 5
-        CANDIDATE_K = 30  # internal only (can be 20-50)
 
-        # Get embedder attribute safely (matches your repo)
+        import numpy as np
+
+        FINAL_K = self.cfg.top_k_retrieve  # must be 5 (assignment)
+        CANDIDATE_K = 30  # internal candidate pool
+
+        # ---- Get embedder safely ----
         embedder = (
                 getattr(self, "embed_model", None)
                 or getattr(self, "embedder", None)
@@ -40,53 +43,47 @@ class RagSystem:
         if embedder is None:
             raise AttributeError("No embedding model found on RagSystem")
 
-        qv = embedder.encode([q], normalize_embeddings=True)[0]
+        # ---- Encode query ----
+        qv = embedder.encode([q], normalize_embeddings=True)
+        qv = np.array(qv).astype("float32")
 
-        # FAISS similarity -> candidate pool
-        raw_hits = faiss_search(self.index, qv, top_k=CANDIDATE_K)
+        # ---- FAISS search (use real index inside wrapper) ----
+        D, I = self.index.index.search(qv, CANDIDATE_K)
 
-        # Normalize hits to dicts: {"text":..., "metadata":..., "score":...}
         candidates = []
-        for h in raw_hits:
-            if isinstance(h, dict):
-                candidates.append(h)
+
+        for idx, score in zip(I[0], D[0]):
+            if idx == -1:
                 continue
 
-            if isinstance(h, (tuple, list)):
-                if len(h) == 2 and isinstance(h[1], dict):
-                    score, doc = h
-                    candidates.append(
-                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)})
-                    continue
+            candidates.append({
+                "text": self.index.texts[idx],
+                "metadata": self.index.metadatas[idx],
+                "score": float(score)
+            })
 
-                if len(h) == 2 and isinstance(h[0], dict):
-                    doc, score = h
-                    candidates.append(
-                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)})
-                    continue
-
-                if len(h) == 2 and all(isinstance(x, (int, float)) for x in h):
-                    a, b = h
-                    idx = int(a)
-                    score = float(b)
-                    if hasattr(self, "store") and hasattr(self.store, "get"):
-                        doc = self.store.get(idx)
-                        candidates.append({"text": doc["text"], "metadata": doc["metadata"], "score": score})
-                    continue
-
-            continue
-
-        # If reranker enabled, rerank candidate pool
+        # ---- Optional reranking ----
         if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
-            scores = self.reranker.predict(pairs)
-            for c, s in zip(candidates, scores):
-                c["_rerank_score"] = float(s)
-            candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
+            rerank_scores = self.reranker.predict(pairs)
 
-        # Final top-5 (rubric)
+            for c, rs in zip(candidates, rerank_scores):
+                c["_rerank_score"] = float(rs)
+
+            candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
+        else:
+            # If no reranker, sort by similarity score
+            candidates.sort(key=lambda x: x["score"], reverse=True)
+
+        # ---- Final top-5 ----
         top = candidates[:FINAL_K]
-        return [{"text": c["text"], "metadata": c["metadata"]} for c in top]
+
+        print("Retrieved:", len(top))
+
+        return [
+            {"text": c["text"], "metadata": c["metadata"]}
+            for c in top
+        ]
 
     def answer_question(self, q: str):
         contexts = self.retrieve(q)
