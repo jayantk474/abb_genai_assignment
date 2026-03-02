@@ -19,7 +19,7 @@ def _clean(text: str) -> str:
 
 def extract_pdf_pages(pdf_path: str) -> List[PageText]:
     texts = []
-    with pdfplumber.open(path) as pdf:
+    with pdfplumber.open(pdf_path) as pdf:
         for i, page in enumerate(pdf.pages):
             text = page.extract_text(x_tolerance=1, y_tolerance=1)
             if text:
