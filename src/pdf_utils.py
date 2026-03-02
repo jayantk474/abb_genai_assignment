@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any, Iterable, Tuple, Optional
 import pdfplumber
+
 import re
 
 @dataclass
@@ -16,13 +17,13 @@ def _clean(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
-def extract_pdf_text(path):
+def extract_pdf_pages(pdf_path: str) -> List[PageText]:
     texts = []
     with pdfplumber.open(path) as pdf:
         for i, page in enumerate(pdf.pages):
             text = page.extract_text(x_tolerance=1, y_tolerance=1)
             if text:
-                texts.append((i+1, text))
+                texts.append((i + 1, text))
     return texts
 
 SECTION_RE = re.compile(
