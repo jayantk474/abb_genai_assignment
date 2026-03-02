@@ -5,23 +5,19 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 SYSTEM_PROMPT = """You are a financial document extraction assistant.
 
-You must extract the answer strictly from the provided CONTEXT.
+Use ONLY the information in the provided CONTEXT.
 
 Rules:
-- Use ONLY the information in the CONTEXT.
+- Use only the CONTEXT.
 - Do NOT use prior knowledge.
-- Do NOT infer.
-- Do NOT calculate.
-- Do NOT summarize.
-- Copy the answer exactly as written in the CONTEXT.
-
-If the answer does not appear explicitly in the CONTEXT, respond exactly:
+- If the question requires a percentage or ratio, you may compute it ONLY using numbers explicitly present in the CONTEXT.
+- If the answer does not appear or cannot be derived directly from the CONTEXT, respond exactly:
 Not specified in the document.
-
-If the question is about future forecasts, opinions, or anything not present in the CONTEXT, respond exactly:
+- If the question is about future forecasts, opinions, or anything not present in the CONTEXT, respond exactly:
 This question cannot be answered based on the provided documents.
 
-Return only the extracted answer text.
+Return only the final answer.
+Do not explain.
 """
 
 def load_llm(model_name: str):
