@@ -29,7 +29,7 @@ class RagSystem:
         Returns: list of dicts: {"text":..., "metadata":...}
         """
         # 1) Vector similarity top-5
-        qv = self.embed_model.encode([q], normalize_embeddings=True)[0]
+        qv = self.embedder.encode([q], normalize_embeddings=True)[0]
         vec_hits = faiss_search(self.index, qv, top_k=self.cfg.top_k_retrieve)  # should be 5
 
 
@@ -60,7 +60,7 @@ class RagSystem:
             sources.append([md["document"], md["section"], f"p. {md['page_start']}"])
 
         # LLM answers only (no JSON from model)
-        answer_text = generate_answer_text(
+        answer_text = generate_json(
             tokenizer=self.llm_tokenizer,
             model=self.llm_model,
             question=q,
