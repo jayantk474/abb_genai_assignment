@@ -22,7 +22,7 @@ def extract_pdf_pages(pdf_path: str) -> List[PageText]:
     with pdfplumber.open(pdf_path) as pdf:
         for i, p in enumerate(pdf.pages, start=1):
             txt = p.extract_text(x_tolerance=1, y_tolerance=1) or ""
-            pages.append(Page(page=i, text=txt))
+            pages.append(PageText(page=i, text=txt))
     return pages
 
 SECTION_RE = re.compile(
