@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any, Iterable, Tuple, Optional
-from pypdf import PdfReader
+import pdfplumber
 import re
 
 @dataclass
@@ -16,16 +16,14 @@ def _clean(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
-def extract_pdf_pages(pdf_path: str) -> List[PageText]:
-    # Use pdfplumber for better table/text extraction on 10-K style PDFs
-    import pdfplumber
-
-    pages: List[PageText] = []
-    with pdfplumber.open(pdf_path) as pdf:
+def extract_pdf_text(path):
+    texts = []
+    with pdfplumber.open(path) as pdf:
         for i, page in enumerate(pdf.pages):
-            raw = page.extract_text() or ""
-            pages.append(PageText(text=_clean(raw), page=i + 1))
-    return pages
+            text = page.extract_text(x_tolerance=1, y_tolerance=1)
+            if text:
+                texts.append((i+1, text))
+    return texts
 
 SECTION_RE = re.compile(
     r"\b(Item\s+\d+[A-Z]?)\b|\b(Signatures?)\b|\b(Notes?\s+to\s+Consolidated\s+Financial\s+Statements)\b",
