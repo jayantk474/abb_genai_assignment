@@ -118,13 +118,21 @@ def generate_json(tokenizer, model, *args, **kwargs) -> str:
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[-1]
 
-    output = model.generate(
+    outputs = model.generate(
         **inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=(temperature > 0),
-        temperature=temperature if temperature > 0 else None,
+        max_new_tokens=128,
+        do_sample=False,
+        temperature=0.0,
         pad_token_id=tokenizer.eos_token_id,
     )
 
-    gen_tokens = output[0][input_len:]
-    return tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
+    # Only take newly generated tokens
+    generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+
+    text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+
+    # HARD STOP — first line only
+    text = text.strip().split("\n")[0].strip()
+
+
+    return text
