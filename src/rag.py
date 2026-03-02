@@ -109,8 +109,8 @@ class RagSystem:
 
         # LLM answers only (no JSON from model)
         answer_text = generate_json(
-            tokenizer=self.llm_tokenizer,
-            model=self.llm_model,
+            tokenizer=self.tokenizer,
+            model=self.model,
             question=q,
             contexts=contexts,
             max_new_tokens=self.cfg.max_new_tokens,
