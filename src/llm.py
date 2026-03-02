@@ -3,18 +3,20 @@ from typing import List, Dict, Any
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-SYSTEM_PROMPT = """
-You are a careful financial document QA assistant.
+SYSTEM_PROMPT = """You are a careful financial document QA assistant.
 You must answer using ONLY the provided CONTEXT from SEC 10-K filings.
 
-If the question is about the future, personal opinions, forecasts, or anything NOT contained in the filings, answer exactly:
-"This question cannot be answered based on the provided documents."
+Rules:
+- If the question is about the future, forecasts, personal opinions, or anything NOT contained in the filings, answer exactly:
+This question cannot be answered based on the provided documents.
+- If the question is in-scope but the documents do not specify the requested detail, answer exactly:
+Not specified in the document.
 
-If the question is in-scope but the documents do not specify the requested detail, answer exactly:
-"Not specified in the document."
+Critical constraint:
+- If you provide a factual answer (a number, date, name, etc.), it MUST appear verbatim in the CONTEXT. Do not guess or infer.
 
-Always provide a short, direct answer ONLY.
-Do NOT output JSON.
+Output:
+- Return ONLY the answer sentence (no JSON, no extra text).
 """
 
 def load_llm(model_name: str):
@@ -31,16 +33,8 @@ def load_llm(model_name: str):
     return tokenizer, model
 
 def build_prompt(question: str, contexts: list[dict]) -> str:
-    """
-    Simple, robust prompt:
-    - includes sources
-    - ends with 'Answer:' so the model doesn't echo QUESTION/CONTEXT
-    - keep context reasonably bounded to avoid GPU OOM
-    """
-    # Keep only first 5 contexts (already top-5)
     contexts = contexts[:5]
 
-    # Light context caps to prevent OOM while keeping tables readable
     MAX_CHUNK_CHARS = 1600
     MAX_TOTAL_CTX_CHARS = 7000
 
@@ -49,29 +43,16 @@ def build_prompt(question: str, contexts: list[dict]) -> str:
     for i, c in enumerate(contexts, 1):
         md = c["metadata"]
         header = f'[{i}] SOURCE: {md["document"]} | {md["section"]} | p. {md["page_start"]}-{md["page_end"]}'
-        chunk = (c["text"] or "").strip()
-        chunk = chunk[:MAX_CHUNK_CHARS]
-
+        chunk = (c["text"] or "").strip()[:MAX_CHUNK_CHARS]
         block = header + "\n" + chunk
         if total + len(block) > MAX_TOTAL_CTX_CHARS:
             break
-
         blocks.append(block)
         total += len(block)
 
     ctx_text = "\n\n".join(blocks)
 
-    system = (
-        "You are a careful financial document QA assistant.\n"
-        "You must answer using ONLY the provided CONTEXT from SEC 10-K filings.\n"
-        "If the question is about the future, personal opinions, forecasts, or anything NOT contained in the filings, answer exactly:\n"
-        "\"This question cannot be answered based on the provided documents.\"\n"
-        "If the question is in-scope but the documents do not specify the requested detail, answer exactly:\n"
-        "\"Not specified in the document.\"\n"
-        "Always provide a short, direct answer.\n"
-    )
-
-    return f"""{system}
+    return f"""{SYSTEM_PROMPT}
 
 CONTEXT:
 {ctx_text}
@@ -121,5 +102,13 @@ def generate_json(
     # Return only first meaningful line (prevents 'QUESTION:' echo + long rambles)
     lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
     answer = lines[0] if lines else "Not specified in the document."
+    REFUSAL = "This question cannot be answered based on the provided documents."
+    NOT_SPECIFIED = "Not specified in the document."
+
+    # If not refusal/not-specified, the answer must appear in the context verbatim
+    if answer not in (REFUSAL, NOT_SPECIFIED):
+        ctx_all = "\n".join([(c["text"] or "") for c in contexts])
+        if answer not in ctx_all:
+            answer = NOT_SPECIFIED
 
     return answer
