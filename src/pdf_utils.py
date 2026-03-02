@@ -17,11 +17,14 @@ def _clean(text: str) -> str:
     return text.strip()
 
 def extract_pdf_pages(pdf_path: str) -> List[PageText]:
-    reader = PdfReader(pdf_path)
+    # Use pdfplumber for better table/text extraction on 10-K style PDFs
+    import pdfplumber
+
     pages: List[PageText] = []
-    for i, page in enumerate(reader.pages):
-        raw = page.extract_text() or ""
-        pages.append(PageText(text=_clean(raw), page=i+1))
+    with pdfplumber.open(pdf_path) as pdf:
+        for i, page in enumerate(pdf.pages):
+            raw = page.extract_text() or ""
+            pages.append(PageText(text=_clean(raw), page=i + 1))
     return pages
 
 SECTION_RE = re.compile(
