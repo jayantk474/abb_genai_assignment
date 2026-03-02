@@ -24,28 +24,76 @@ class RagSystem:
     def retrieve(self, q: str):
         """
         Simple pipeline:
-        1) Vector similarity search (FAISS) -> top-5
-        2) Optional rerank (CrossEncoder) of those same 5
-        Returns: list of dicts: {"text":..., "metadata":...}
+        1) FAISS similarity search -> top_k_retrieve (5)
+        2) Rerank those 5 (if reranker enabled)
+        Returns list of {"text":..., "metadata":...}
         """
-        # 1) Vector similarity top-5
-        qv = self.embedder.encode([q], normalize_embeddings=True)[0]
-        vec_hits = faiss_search(self.index, qv, top_k=self.cfg.top_k_retrieve)  # should be 5
+        # Get embedder attribute safely (matches your repo)
+        embedder = (
+                getattr(self, "embed_model", None)
+                or getattr(self, "embedder", None)
+                or getattr(self, "embedding_model", None)
+        )
+        if embedder is None:
+            raise AttributeError("No embedding model found on RagSystem")
 
+        qv = embedder.encode([q], normalize_embeddings=True)[0]
 
-        candidates = vec_hits
+        # FAISS top-5
+        raw_hits = faiss_search(self.index, qv, top_k=self.cfg.top_k_retrieve)
 
-        # 2) Rerank
-        if self.reranker is not None and self.cfg.top_k_rerank > 0 and len(candidates) > 1:
+        # ---- Normalize hits to dicts: {"text":..., "metadata":..., "score":...} ----
+        candidates = []
+        for h in raw_hits:
+            if isinstance(h, dict):
+                # already normalized
+                candidates.append(h)
+                continue
+
+            # tuple/list formats:
+            if isinstance(h, (tuple, list)):
+                # Common cases:
+                # (score, doc)  where doc is dict-like
+                if len(h) == 2 and isinstance(h[1], dict):
+                    score, doc = h
+                    candidates.append(
+                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)}
+                    )
+                    continue
+
+                # (doc, score)
+                if len(h) == 2 and isinstance(h[0], dict):
+                    doc, score = h
+                    candidates.append(
+                        {"text": doc.get("text", ""), "metadata": doc.get("metadata", {}), "score": float(score)}
+                    )
+                    continue
+
+                # (idx, score) or (score, idx) -> use idx to fetch stored chunk
+                if len(h) == 2 and all(isinstance(x, (int, float)) for x in h):
+                    a, b = h
+                    # try interpret first as idx
+                    idx = int(a)
+                    score = float(b)
+                    if hasattr(self, "store") and hasattr(self.store, "get"):
+                        doc = self.store.get(idx)
+                        candidates.append({"text": doc["text"], "metadata": doc["metadata"], "score": score})
+                        continue
+                    # otherwise can't resolve -> skip
+                    continue
+
+            # unknown format -> skip
+            continue
+
+        # If reranker enabled, rerank these 5
+        if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
-            scores = self.reranker.predict(pairs)  # higher is better
-
+            scores = self.reranker.predict(pairs)
             for c, s in zip(candidates, scores):
                 c["_rerank_score"] = float(s)
+            candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
 
-            candidates = sorted(candidates, key=lambda x: x.get("_rerank_score", -1e9), reverse=True)
-
-        # Final: return top-5 (same count as required)
+        # final top-5
         top = candidates[: self.cfg.top_k_retrieve]
         return [{"text": c["text"], "metadata": c["metadata"]} for c in top]
 
