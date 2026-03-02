@@ -41,10 +41,23 @@ def main():
         return
 
     results = []
-    for qid, q in QUESTIONS:
-        r = rag.answer_question(q)
-        results.append({"question_id": qid, "answer": r["answer"], "sources": r["sources"]})
-        print(f"Q{qid}: {r['answer']}")
+    for item in QUESTIONS:
+        # Backwards compatible:
+        #   - (qid, "question") tuples (default)
+        #   - {"question_id": qid, "question": "..."} dicts
+        if isinstance(item, dict):
+            qid = item.get("question_id")
+            q = item.get("question") or item.get("query") or item.get("q") or ""
+        else:
+            qid, q = item
+
+        r = rag.answer_question(item if isinstance(item, dict) else q)
+        results.append({
+            "question_id": qid,
+            "answer": r.get("answer", ""),
+            "sources": r.get("sources", []),
+        })
+        print(f"Q{qid}: {r.get('answer','')}")
 
     with open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
