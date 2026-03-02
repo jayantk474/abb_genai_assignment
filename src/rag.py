@@ -21,7 +21,7 @@ class RagSystem:
         self.bm25: dict[str, HybridRetriever] = {
             k: HybridRetriever(v.texts) for k, v in self.indices.items()
         }
-        self.reranker = CrossEncoder(cfg.reranker_model_name) if cfg.reranker_model_name else None
+        self.reranker = CrossEncoder(cfg.reranker_model_name,device="cpu") if cfg.reranker_model_name else None
         self.tokenizer, self.model = load_llm(cfg.llm_model_name)
         # Convenience attribute used by some scripts/notebooks
         self.device = getattr(self.model, "device", None)
@@ -90,7 +90,7 @@ class RagSystem:
         # Cross-encoder rerank (if enabled)
         if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
-            rerank_scores = self.reranker.predict(pairs)
+            rerank_scores = self.reranker.predict(pairs,batch_szie=1)
             for c, rs in zip(candidates, rerank_scores):
                 c["_rerank_score"] = float(rs)
             candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)
