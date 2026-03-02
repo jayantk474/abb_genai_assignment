@@ -90,7 +90,7 @@ class RagSystem:
         # Cross-encoder rerank (if enabled)
         if self.reranker is not None and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
-            rerank_scores = self.reranker.predict(pairs,batch_szie=1)
+            rerank_scores = self.reranker.predict(pairs)
             for c, rs in zip(candidates, rerank_scores):
                 c["_rerank_score"] = float(rs)
             candidates.sort(key=lambda x: x["_rerank_score"], reverse=True)

@@ -5,7 +5,7 @@ class RagConfig:
     # Embeddings
     embed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     # Reranker (CrossEncoder). Set to "" to disable.
-    reranker_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model_name = "cross-encoder/ms-marco-TinyBERT-L-2-v2"
     # LLM (open) – small enough for Colab CPU/GPU; works better on GPU.
     llm_model_name: str = "microsoft/Phi-3-mini-4k-instruct"
     max_new_tokens: int = 128
