@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -72,27 +72,63 @@ import torch
 import re
 
 @torch.inference_mode()
-def generate_json(model, tokenizer, prompt: str, max_new_tokens: int, device: str):
+def generate_json(tokenizer, model, *args, **kwargs) -> str:
+    """Generate the completion for our RAG prompt.
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    This function is intentionally tolerant to minor signature mismatches
+    to prevent integration breakages across notebooks/scripts.
+
+    Supported call patterns:
+    - generate_json(tokenizer, model, question, contexts, max_new_tokens=..., temperature=...)
+    - generate_json(tokenizer, model, prompt, max_new_tokens=..., temperature=...)
+    - generate_json(..., question=..., contexts=...)
+    - generate_json(..., prompt=...)
+
+    Always returns ONLY the generated answer text (no prompt echo).
+    """
+
+    question: Optional[str] = kwargs.pop("question", None)
+    contexts = kwargs.pop("contexts", None)
+    prompt: Optional[str] = kwargs.pop("prompt", None)
+    max_new_tokens: int = int(kwargs.pop("max_new_tokens", 80))
+    temperature: float = float(kwargs.pop("temperature", 0.0))
+
+    # Positional parsing
+    # (question, contexts, [max_new_tokens], [temperature])
+    # or (prompt, [max_new_tokens], [temperature])
+    if prompt is None and question is None and contexts is None:
+        if len(args) >= 2:
+            question = args[0]
+            contexts = args[1]
+            if len(args) >= 3:
+                max_new_tokens = int(args[2])
+            if len(args) >= 4:
+                temperature = float(args[3])
+        elif len(args) >= 1:
+            prompt = args[0]
+            if len(args) >= 2:
+                max_new_tokens = int(args[1])
+            if len(args) >= 3:
+                temperature = float(args[2])
+
+    if prompt is None:
+        if question is None or contexts is None:
+            raise TypeError(
+                "generate_json expected either (question, contexts) or (prompt). "
+                f"Got args={len(args)} and missing question/contexts/prompt."
+            )
+        prompt = build_prompt(str(question), contexts)
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_len = inputs["input_ids"].shape[-1]
 
     output = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
-        do_sample=False,
-        temperature=0.0,
+        do_sample=(temperature > 0),
+        temperature=temperature if temperature > 0 else None,
         pad_token_id=tokenizer.eos_token_id,
     )
 
-    # Decode ONLY newly generated tokens
-    gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
-
-    decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
-
-    # Remove accidental "Answer:" prefix
-    decoded = re.sub(r"^Answer\s*:\s*", "", decoded, flags=re.IGNORECASE).strip()
-
-    if not decoded:
-        return "Not specified in the document."
-
-    return decoded
+    gen_tokens = output[0][input_len:]
+    return tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
