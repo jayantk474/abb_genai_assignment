@@ -42,5 +42,6 @@ def search(index: VectorIndex, query_vec: np.ndarray, top_k: int) -> List[Tuple[
     if q.ndim == 1:
         q = q[None, :]
     scores, ids = index.index.search(q, top_k)
-    print("Built index size:", index.ntotal)
+    print(type(index))
+    print(dir(index))
     return list(zip(ids[0].tolist(), scores[0].tolist()))
