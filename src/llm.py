@@ -38,6 +38,7 @@ def load_llm(model_name: str):
     return tokenizer, model
 
 def build_prompt(question: str, contexts: list[dict]) -> str:
+    print("Retrieved:", len(contexts))
     contexts = contexts[:5]
 
     MAX_CHUNK_CHARS = 800
@@ -79,6 +80,7 @@ def generate_json(
     max_new_tokens: int = 80,
     temperature: float = 0.0,
 ) -> str:
+    print("Retrieved:", len(contexts))
     prompt = build_prompt(question, contexts)
 
     # Ensure pad token exists (Phi-3 often uses eos as pad)
