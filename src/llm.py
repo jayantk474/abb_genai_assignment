@@ -7,17 +7,17 @@ SYSTEM_PROMPT = """You are a financial document extraction assistant.
 
 Use ONLY the information in the provided CONTEXT.
 
-Rules:
-- Use only the CONTEXT.
-- Do NOT use prior knowledge.
-- If the question requires a percentage or ratio, you may compute it ONLY using numbers explicitly present in the CONTEXT.
+Rules (must follow exactly):
+- Use only the CONTEXT. Do NOT use outside knowledge.
+- Answer ONLY the user's question. Do NOT ask follow-up questions. Do NOT add extra Q&A.
+- If a percentage/ratio is asked, you may compute it ONLY using numbers explicitly present in the CONTEXT.
 - If the answer does not appear or cannot be derived directly from the CONTEXT, respond exactly:
 Not specified in the document.
-- If the question is about future forecasts, opinions, or anything not present in the CONTEXT, respond exactly:
+- If the question is out-of-scope for the provided documents (e.g., forecasts, predictions, anything outside the filings), respond exactly:
 This question cannot be answered based on the provided documents.
 
-Return only the final answer.
-Do not explain.
+Output requirements:
+- Return ONLY the answer text (no citations, no explanations, no formatting).
 """
 
 def load_llm(model_name: str):
@@ -37,8 +37,9 @@ def build_prompt(question: str, contexts: list[dict]) -> str:
     print("Retrieved:", len(contexts))
     contexts = contexts[:5]
 
-    MAX_CHUNK_CHARS = 800
-    MAX_TOTAL_CTX_CHARS = 3500
+    # 10-K financial tables can be wide/long; give the model more context.
+    MAX_CHUNK_CHARS = 1400
+    MAX_TOTAL_CTX_CHARS = 6500
 
     blocks = []
     total = 0
@@ -66,6 +67,13 @@ Answer:"""
 
 import torch
 import re
+
+_STOP_PATTERNS = [
+    "\nQUESTION:",
+    "\n\nQUESTION:",
+    "\nQ:",
+    "\n\nQ:",
+]
 
 @torch.inference_mode()
 def generate_json(tokenizer, model, *args, **kwargs) -> str:
@@ -118,21 +126,32 @@ def generate_json(tokenizer, model, *args, **kwargs) -> str:
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[-1]
 
+    do_sample = bool(temperature and temperature > 0)
+
     outputs = model.generate(
         **inputs,
-        max_new_tokens=128,
-        do_sample=False,
-        temperature=0.0,
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        temperature=temperature if do_sample else 0.0,
         pad_token_id=tokenizer.eos_token_id,
     )
 
     # Only take newly generated tokens
     generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
 
-    text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+    text = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
-    # HARD STOP — first line only
-    text = text.strip().split("\n")[0].strip()
+    # Hard-stop if the model tries to continue with extra Q&A.
+    for pat in _STOP_PATTERNS:
+        if pat in text:
+            text = text.split(pat, 1)[0].strip()
 
+    # Some models prepend labels.
+    text = re.sub(r"^(Answer:|A:|Final:|Response:)\s*", "", text, flags=re.IGNORECASE).strip()
+
+    # If the model returns multiple lines, keep the first non-empty line.
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if lines:
+        text = lines[0]
 
     return text

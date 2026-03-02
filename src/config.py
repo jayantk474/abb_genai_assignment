@@ -11,8 +11,9 @@ class RagConfig:
     max_new_tokens: int = 128
     temperature: float = 0.0
     # Chunking
-    chunk_chars: int = 600
-    chunk_overlap_chars: int = 100
+    # Larger chunks reduce table/statement fragmentation.
+    chunk_chars: int = 1200
+    chunk_overlap_chars: int = 200
 
     # Retrieval
     top_k_retrieve = 5
