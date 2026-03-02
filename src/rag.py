@@ -21,58 +21,59 @@ class RagSystem:
         vec = self.embedder.encode([q], normalize_embeddings=True)
         return vec[0]
 
-    def retrieve(self, q: str) -> List[Dict[str, Any]]:
-        qv = self.embed_query(q)
-        vec_hits = faiss_search(self.index, qv, self.cfg.top_k_retrieve)
-        # Hybrid combine (vector + BM25) for robustness
-        ranked = hybrid_rank(q, vec_hits, self.bm25, alpha=0.25, top_k=self.cfg.top_k_retrieve)
+    def retrieve(self, q: str):
+        """
+        Simple pipeline:
+        1) Vector similarity search (FAISS) -> top-5
+        2) Optional rerank (CrossEncoder) of those same 5
+        Returns: list of dicts: {"text":..., "metadata":...}
+        """
+        # 1) Vector similarity top-5
+        qv = self.embed_model.encode([q], normalize_embeddings=True)[0]
+        vec_hits = faiss_search(self.index, qv, top_k=self.cfg.top_k_retrieve)  # should be 5
 
-        # Prepare candidates
-        candidates = [{
-            "text": self.index.texts[i],
-            "metadata": self.index.metadatas[i],
-            "score": s,
-            "id": i
-        } for i, s in ranked if i != -1]
 
-        # Rerank with CrossEncoder for final top_k_rerank
-        if self.reranker and candidates:
+        candidates = vec_hits
+
+        # 2) Rerank
+        if self.reranker is not None and self.cfg.top_k_rerank > 0 and len(candidates) > 1:
             pairs = [(q, c["text"]) for c in candidates]
-            rr = self.reranker.predict(pairs)
-            for c, r in zip(candidates, rr):
-                c["rerank_score"] = float(r)
-            candidates.sort(key=lambda x: x.get("rerank_score", 0.0), reverse=True)
+            scores = self.reranker.predict(pairs)  # higher is better
 
-        top = candidates[: self.cfg.top_k_retrieve]  # final top-5 after rerank
+            for c, s in zip(candidates, scores):
+                c["_rerank_score"] = float(s)
+
+            candidates = sorted(candidates, key=lambda x: x.get("_rerank_score", -1e9), reverse=True)
+
+        # Final: return top-5 (same count as required)
+        top = candidates[: self.cfg.top_k_retrieve]
         return [{"text": c["text"], "metadata": c["metadata"]} for c in top]
 
-    def answer_question(self, q: str) -> Dict[str, Any]:
+    def answer_question(self, q: str):
         contexts = self.retrieve(q)
-        prompt = build_prompt(q, contexts)
-        obj = generate_json(
-            self.tokenizer,
-            self.model,
-            prompt,
+
+        # Build sources from retrieved chunks (always from top-5)
+        sources = []
+        for c in contexts:
+            md = c["metadata"]
+            # exact requested format: ["Apple 10-K", "Item 8", "p. 28"]
+            sources.append([md["document"], md["section"], f"p. {md['page_start']}"])
+
+        # LLM answers only (no JSON from model)
+        answer_text = generate_answer_text(
+            tokenizer=self.llm_tokenizer,
+            model=self.llm_model,
+            question=q,
+            contexts=contexts,
             max_new_tokens=self.cfg.max_new_tokens,
             temperature=self.cfg.temperature,
         )
 
-        # Ensure sources are well-formed and come from retrieved metadata.
-        # We'll map to citations based on chosen chunks (avoid hallucinated citations).
-        if obj["answer"] in [
+        # Enforce rubric rules on sources
+        if answer_text in [
             "This question cannot be answered based on the provided documents.",
-            "Not specified in the document."
+            "Not specified in the document.",
         ]:
-            obj["sources"] = []
-            return obj
+            sources = []
 
-        # Otherwise, attach citations from the retrieved chunks (top-5)
-        sources = []
-        for c in contexts[:5]:
-            md = c["metadata"]
-            sources.append([md["document"], md["section"], f"p. {md['page_start']}"])
-        obj["sources"] = sources
-        print("Retrieved", len(contexts), "chunks")
-        print(contexts[0]["metadata"])
-        print(contexts[0]["text"][:400])
-        return obj
+        return {"answer": answer_text, "sources": sources}

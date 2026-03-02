@@ -31,74 +31,95 @@ def load_llm(model_name: str):
     return tokenizer, model
 
 def build_prompt(question: str, contexts: list[dict]) -> str:
-    # Keep only top-5 contexts (already reranked)
+    """
+    Simple, robust prompt:
+    - includes sources
+    - ends with 'Answer:' so the model doesn't echo QUESTION/CONTEXT
+    - keep context reasonably bounded to avoid GPU OOM
+    """
+    # Keep only first 5 contexts (already top-5)
     contexts = contexts[:5]
 
-    ctx_blocks = []
-    total = 0
-    MAX_TOTAL_CTX_CHARS = 6500
-    MAX_CHUNK_CHARS = 1400
+    # Light context caps to prevent OOM while keeping tables readable
+    MAX_CHUNK_CHARS = 1600
+    MAX_TOTAL_CTX_CHARS = 7000
 
+    blocks = []
+    total = 0
     for i, c in enumerate(contexts, 1):
         md = c["metadata"]
         header = f'[{i}] SOURCE: {md["document"]} | {md["section"]} | p. {md["page_start"]}-{md["page_end"]}'
-        chunk = c["text"][:MAX_CHUNK_CHARS]
+        chunk = (c["text"] or "").strip()
+        chunk = chunk[:MAX_CHUNK_CHARS]
 
         block = header + "\n" + chunk
         if total + len(block) > MAX_TOTAL_CTX_CHARS:
             break
-        ctx_blocks.append(block)
+
+        blocks.append(block)
         total += len(block)
 
-    ctx_text = "\n\n".join(ctx_blocks)
+    ctx_text = "\n\n".join(blocks)
 
-    return f"""QUESTION:
-{question}
+    system = (
+        "You are a careful financial document QA assistant.\n"
+        "You must answer using ONLY the provided CONTEXT from SEC 10-K filings.\n"
+        "If the question is about the future, personal opinions, forecasts, or anything NOT contained in the filings, answer exactly:\n"
+        "\"This question cannot be answered based on the provided documents.\"\n"
+        "If the question is in-scope but the documents do not specify the requested detail, answer exactly:\n"
+        "\"Not specified in the document.\"\n"
+        "Always provide a short, direct answer.\n"
+    )
+
+    return f"""{system}
 
 CONTEXT:
 {ctx_text}
 
-INSTRUCTIONS:
-- Use only CONTEXT.
-- If future/out-of-scope -> respond exactly: "This question cannot be answered based on the provided documents."
-- If not specified -> respond exactly: "Not specified in the document."
-Respond with only the final answer sentence.
-"""
-def generate_json(tokenizer, model, prompt: str, max_new_tokens: int, temperature: float):
-    # Ensure pad token exists
+QUESTION: {question}
+
+Answer:"""
+
+
+import torch
+import re
+
+@torch.inference_mode()
+def generate_json(
+    tokenizer,
+    model,
+    question: str,
+    contexts: list[dict],
+    max_new_tokens: int = 80,
+    temperature: float = 0.0,
+) -> str:
+    prompt = build_prompt(question, contexts)
+
+    # Ensure pad token exists (Phi-3 often uses eos as pad)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=3500,      # safe under 4k context
-    ).to(model.device)
+    inputs = tokenizer(prompt, return_tensors="pt")
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
+    # Deterministic generation
     output = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
         do_sample=False,
-        temperature=0.0,
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
     )
 
+    # Decode only generated tokens (prevents prompt echo)
     gen_tokens = output[0][inputs["input_ids"].shape[-1]:]
     decoded = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
 
-    answer_text = decoded.strip()
+    # Clean common artifacts
+    decoded = re.sub(r"```(?:json)?", "", decoded, flags=re.IGNORECASE).replace("```", "").strip()
 
-    # If model still outputs code fences, strip them
-    import re
-    answer_text = re.sub(r"```(?:json)?", "", answer_text, flags=re.IGNORECASE).replace("```", "").strip()
+    # Return only first meaningful line (prevents 'QUESTION:' echo + long rambles)
+    lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
+    answer = lines[0] if lines else "Not specified in the document."
 
-    # keep it short: first non-empty line
-    lines = [ln.strip() for ln in answer_text.splitlines() if ln.strip()]
-    answer_text = lines[0] if lines else "Not specified in the document."
-
-    return {"answer": answer_text, "sources": []}
-
-    # safe fallback
-    return {"answer": "Not specified in the document.", "sources": []}
+    return answer

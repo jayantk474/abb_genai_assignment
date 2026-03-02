@@ -11,11 +11,9 @@ class RagConfig:
     max_new_tokens: int = 80
     temperature: float = 0.0
     # Chunking
-    chunk_chars: int = 1200
-    chunk_overlap_chars: int = 150
+    chunk_chars: int = 1800
+    chunk_overlap_chars: int = 250
 
     # Retrieval
-    fetch_k: int = 30
-    top_k_retrieve: int = 5
-    top_k_rerank: int = 5
-
+    top_k_retrieve = 5
+    top_k_rerank = 5
