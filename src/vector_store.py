@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Union
 import os
 import json
 import numpy as np
@@ -11,6 +11,14 @@ class VectorIndex:
     index: faiss.Index
     texts: List[str]
     metadatas: List[Dict[str, Any]]
+
+    @property
+    def ntotal(self) -> int:
+        """Compatibility shim for code that expects `VectorIndex.ntotal` like FAISS."""
+        return int(getattr(self.index, "ntotal", 0))
+
+    def __len__(self) -> int:
+        return len(self.texts)
 
     def save(self, out_dir: str) -> None:
         os.makedirs(out_dir, exist_ok=True)
@@ -37,11 +45,22 @@ def build_faiss(embeddings: np.ndarray) -> faiss.Index:
     index.add(embeddings.astype(np.float32))
     return index
 
-def search(index: VectorIndex, query_vec: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+def search(index: Union[VectorIndex, faiss.Index], query_vec: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+    """Vector similarity search.
+
+    Accepts either the repo's `VectorIndex` wrapper or a raw `faiss.Index`.
+    Returns a list of (doc_id, score) pairs and filters out missing ids (-1).
+    """
     q = query_vec.astype(np.float32)
     if q.ndim == 1:
         q = q[None, :]
-    scores, ids = index.index.search(q, top_k)
-    print(type(index))
-    print(dir(index))
-    return list(zip(ids[0].tolist(), scores[0].tolist()))
+
+    faiss_index = index.index if hasattr(index, "index") else index
+    scores, ids = faiss_index.search(q, top_k)
+
+    out: List[Tuple[int, float]] = []
+    for doc_id, score in zip(ids[0].tolist(), scores[0].tolist()):
+        if int(doc_id) == -1:
+            continue
+        out.append((int(doc_id), float(score)))
+    return out
