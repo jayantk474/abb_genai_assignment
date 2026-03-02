@@ -8,6 +8,8 @@ from .vector_store import VectorIndex, search as faiss_search
 from .retrieval import HybridRetriever, hybrid_rank
 from .llm import load_llm, build_prompt, generate_json
 
+import inspect
+
 class RagSystem:
     def __init__(self, cfg: RagConfig, index: VectorIndex):
         self.cfg = cfg
@@ -113,15 +115,30 @@ class RagSystem:
                 f"p. {md.get('page_start')}",
             ])
 
-        # LLM answers only (no JSON from model)
-        answer_text = generate_json(
-            tokenizer=self.tokenizer,
-            model=self.model,
-            question=q,
-            contexts=contexts,
-            max_new_tokens=self.cfg.max_new_tokens,
-            temperature=self.cfg.temperature,
-        )
+        # LLM answers only (no JSON from model). Some environments may have a slightly
+        # different generate_json signature; this keeps the integration stable.
+        sig = inspect.signature(generate_json)
+        if "question" in sig.parameters:
+            answer_text = generate_json(
+                tokenizer=self.tokenizer,
+                model=self.model,
+                question=q,
+                contexts=contexts,
+                max_new_tokens=self.cfg.max_new_tokens,
+                temperature=self.cfg.temperature,
+                device=getattr(self, "device", None),
+            )
+        else:
+            # Legacy positional order: (tokenizer, model, prompt/question, contexts, max_new_tokens, temperature, device)
+            answer_text = generate_json(
+                self.tokenizer,
+                self.model,
+                q,
+                contexts,
+                self.cfg.max_new_tokens,
+                self.cfg.temperature,
+                getattr(self, "device", None),
+            )
         answer_text = str(answer_text).strip()
 
         # Enforce rubric rules on sources
